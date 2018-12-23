@@ -1,5 +1,6 @@
 
 build:
+	./clean.sh
 	./build.sh
 
 
