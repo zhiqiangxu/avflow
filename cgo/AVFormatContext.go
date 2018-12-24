@@ -2,6 +2,7 @@ package cgo
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"unsafe"
 
@@ -61,40 +62,34 @@ func (ctx *AVFormatContext) fillSlice(buf []byte) int {
 
 	size := len(buf)
 
-	offset := 0
-
-	for {
-		// remain to copy
-		remain := size - offset
-		if ctx.payload != nil {
-			if remain < len(ctx.payload)-ctx.offset {
-				copy(buf[offset:], ctx.payload[ctx.offset:ctx.offset+remain])
-				offset += remain
-			} else {
-				copy(buf[offset:], ctx.payload[ctx.offset:])
-				offset += len(ctx.payload) - ctx.offset
-				ctx.payload = nil
-				ctx.offset = 0
-			}
-
-			remain = size - offset
-		}
-
-		frame := <-ctx.frameCh
-		fmt.Println("remain", remain, "len", len(frame.Payload))
-		if remain < len(frame.Payload) {
-			copy(buf[offset:], frame.Payload[0:remain])
-			offset += remain
-			ctx.payload = frame.Payload
-			ctx.offset = remain
-		} else {
-			copy(buf[offset:], frame.Payload)
-			offset += len(frame.Payload)
-		}
-
-		if offset == size {
+	if ctx.payload != nil {
+		if size < len(ctx.payload)-ctx.offset {
+			copy(buf, ctx.payload[ctx.offset:ctx.offset+size])
+			ctx.offset += size
 			return size
 		}
+
+		copy(buf, ctx.payload[ctx.offset:])
+		copied := len(ctx.payload) - ctx.offset
+		ctx.payload = nil
+		ctx.offset = 0
+		return copied
 	}
+
+	frame := <-ctx.frameCh
+	if size < len(frame.Payload) {
+		copy(buf, frame.Payload[0:size])
+		ctx.payload = frame.Payload
+		ctx.offset = size
+		return size
+	}
+
+	if len(frame.Payload) == 0 {
+		fmt.Fprintln(os.Stderr, "found empty frame")
+		return int(C.GOAVERROR_EINVAL())
+	}
+
+	copy(buf, frame.Payload)
+	return len(frame.Payload)
 
 }

@@ -40,6 +40,12 @@ int avformat_open_qrpc_input(AVFormatContext **ppctx, const char *fmt, void* ioc
         goto end;
     }
 
+    if ((ret = avformat_find_stream_info(*ppctx, NULL)) < 0) {
+        fprintf(stderr, "Could not find stream information\n");
+        goto end;
+    }
+
+    printf("nstreams:%d\n", (*ppctx)->nb_streams);
 
 end:
     if (ret < 0) {
@@ -69,6 +75,7 @@ AVFormatContext* AVFormat_Open(const char *fmt, uintptr_t ioctx) {
 void AVFormat_ReadFrame(AVFormatContext* ctx)
 {
     AVPacket pkt;
+    av_init_packet(&pkt);
     
     printf("before av_read_frame\n");
     int ret = av_read_frame(ctx, &pkt);
@@ -78,4 +85,9 @@ void AVFormat_ReadFrame(AVFormatContext* ctx)
         printf("av_read_frame ok\n");
     }
     printf("after av_read_frame\n");
+}
+
+int GOAVERROR_EINVAL()
+{
+    return AVERROR(EINVAL);
 }
