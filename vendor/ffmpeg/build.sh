@@ -25,6 +25,10 @@ OBJS += qrpc.o qrpcpkt.o\
 	--pkg-config-flags="--static"  \
 	--extra-libs="-lpthread -lm" \
 	--bindir="$BUILD_DIR/bin" \
+	--enable-debug \
+	--disable-stripping \
+	--enable-libx264 \
+	--enable-gpl \
 	 && make -j 4 && make install
 
 

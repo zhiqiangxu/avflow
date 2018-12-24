@@ -78,8 +78,9 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
 {
     int port;
     QrpcContext *qctx = s->priv_data;
-    qctx->payload = NULL;
+    qctx->payload = qctx->id = qctx->pass = NULL;
     qctx->payload_len = qctx->offset = 0;
+    
     const char *p;
     char buf[1024];
     int ret;
@@ -96,10 +97,18 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
     p = strchr(uri, '?');
     if (p) {
         if (av_find_info_tag(buf, sizeof(buf), "id", p)) {
+            qctx->id = av_malloc(strlen(buf) + 1);
             av_strlcpy(qctx->id, buf, sizeof(qctx->id));
+        } else {
+            av_log(s, AV_LOG_ERROR, "id missing in uri\n");
+            return AVERROR(EINVAL);
         }
         if (av_find_info_tag(buf, sizeof(buf), "pass", p)) {
+            qctx->pass = av_malloc(strlen(buf) + 1);
             av_strlcpy(qctx->pass, buf, sizeof(qctx->pass));
+        } else {
+            av_log(s, AV_LOG_ERROR, "pass missing in uri\n");
+            return AVERROR(EINVAL);
         }
     }
     
@@ -119,11 +128,11 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
 
     AVBPrint bp;
     av_bprint_init(&bp, 1, AV_BPRINT_SIZE_UNLIMITED);
-    av_bprintf(&bp,"{\"id\":");
+    av_bprintf(&bp,"{\"id\":\"");
     json_escape_str(&bp, qctx->id);
-    av_bprintf(&bp,",\"pass\":");
+    av_bprintf(&bp,"\",\"pass\":\"");
     json_escape_str(&bp, qctx->pass);
-    av_bprintf(&bp,"}");
+    av_bprintf(&bp,"\"}");
 
     char* json;
     av_bprint_finalize(&bp, &json);
@@ -136,7 +145,7 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
     if ((ret = qrpc_read_packet(qctx, &pkt)) < 0)
         return ret;
     
-    if ((pkt.payload_len == 2 && pkt.payload[0] == 'O' && pkt.payload[1] == 'K'))
+    if (!(pkt.payload_len == 2 && pkt.payload[0] == 'O' && pkt.payload[1] == 'K'))
         ret = AVERROR_INVALIDDATA;
 
 
@@ -211,14 +220,12 @@ static int qrpc_write(URLContext *h, const uint8_t *buf, int size)
 static int qrpc_close(URLContext *h)
 {
     QrpcContext *qctx = h->priv_data;
+    if (qctx->id) av_free(qctx->id);
+    if (qctx->pass) av_free(qctx->pass);
+
     return ffurl_close(qctx->stream);
 }
 
-static int qrpc_shutdown(URLContext *h, int flags)
-{
-    QrpcContext *qctx = h->priv_data;
-    return ffurl_shutdown(qctx->stream, flags);
-}
 
 
 const URLProtocol ff_qrpc_protocol = {
@@ -227,7 +234,6 @@ const URLProtocol ff_qrpc_protocol = {
     .url_read            = qrpc_read,
     .url_write           = qrpc_write,
     .url_close           = qrpc_close,
-    .url_shutdown        = qrpc_shutdown,
     .priv_data_size      = sizeof(QrpcContext),
     .flags               = URL_PROTOCOL_FLAG_NETWORK,
     .priv_data_class     = &qrpc_class,
