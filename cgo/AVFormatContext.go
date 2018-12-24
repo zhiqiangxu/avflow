@@ -42,14 +42,16 @@ func NewAVFormatContext(fmt string, frameCh <-chan *qrpc.Frame) *AVFormatContext
 
 // ReadFrame will call AVIOContext internally
 func (ctx *AVFormatContext) ReadFrame() {
+	fmt.Println("ctx.p", unsafe.Pointer(ctx.p))
 	C.AVFormat_ReadFrame(ctx.p)
 }
 
-//export go_callback
-func go_callback(ioctx unsafe.Pointer, buf *C.char, bufSize C.int) C.int {
+//export read_packet_callback
+func read_packet_callback(ioctx unsafe.Pointer, buf *C.char, bufSize C.int) C.int {
 
 	slice := &reflect.SliceHeader{Data: uintptr(unsafe.Pointer(buf)), Len: int(bufSize), Cap: int(bufSize)}
 
+	fmt.Println("bufSize", int(bufSize))
 	ctx := (*AVFormatContext)(ioctx)
 
 	return C.int(ctx.fillSlice(*(*[]byte)(unsafe.Pointer(slice))))
@@ -80,7 +82,7 @@ func (ctx *AVFormatContext) fillSlice(buf []byte) int {
 		}
 
 		frame := <-ctx.frameCh
-		fmt.Println("len", len(frame.Payload))
+		fmt.Println("remain", remain, "len", len(frame.Payload))
 		if remain < len(frame.Payload) {
 			copy(buf[offset:], frame.Payload[0:remain])
 			offset += remain

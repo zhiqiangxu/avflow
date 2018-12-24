@@ -47,7 +47,9 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 	fCtx := cgo.NewAVFormatContext("h264", frame.FrameCh())
 
 	for {
+		fmt.Println("before ReadFrame")
 		fCtx.ReadFrame()
+		fmt.Println("after ReadFrame")
 	}
 
 }
