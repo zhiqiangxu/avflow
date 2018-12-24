@@ -42,7 +42,6 @@ func NewAVFormatContext(fmt string, frameCh <-chan *qrpc.Frame) *AVFormatContext
 
 // ReadFrame will call AVIOContext internally
 func (ctx *AVFormatContext) ReadFrame() {
-	fmt.Println("ctx.p", unsafe.Pointer(ctx.p))
 	C.AVFormat_ReadFrame(ctx.p)
 }
 

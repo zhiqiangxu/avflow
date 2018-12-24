@@ -11,7 +11,7 @@ static int read_packet(void *ioctx, uint8_t *buf, int buf_size)
 
 int avformat_open_qrpc_input(AVFormatContext **ppctx, const char *fmt, void* ioctx)
 {
-    AVOutputFormat *ifmt = av_guess_format(fmt, NULL, NULL);
+    AVInputFormat *ifmt = av_find_input_format(fmt);
     if (!ifmt) {
         fprintf(stderr, "fmt not found:%s\n", fmt);
         return AVERROR(EINVAL);
@@ -69,7 +69,13 @@ AVFormatContext* AVFormat_Open(const char *fmt, uintptr_t ioctx) {
 void AVFormat_ReadFrame(AVFormatContext* ctx)
 {
     AVPacket pkt;
+    
     printf("before av_read_frame\n");
-    av_read_frame(ctx, &pkt);
+    int ret = av_read_frame(ctx, &pkt);
+    if (ret < 0) {
+        printf("av_read_frame ng:%d\n", ret);
+    } else {
+        printf("av_read_frame ok\n");
+    }
     printf("after av_read_frame\n");
 }
