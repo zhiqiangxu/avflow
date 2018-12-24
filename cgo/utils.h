@@ -4,6 +4,6 @@ typedef  AVFormatContext* AVFormatContextPtr;
 
 
 
-AVFormatContext* AVFormat_Open(const char *fmt, void* ioctx);
+AVFormatContext* AVFormat_Open(const char *fmt, uintptr_t ioctx);
 
 void AVFormat_ReadFrame(AVFormatContext* ctx);

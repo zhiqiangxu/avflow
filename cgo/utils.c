@@ -1,10 +1,11 @@
 #include "utils.h"
 
 
+extern int go_callback(void *ioctx, uint8_t *buf, int buf_size);
 
 static int read_packet(void *ioctx, uint8_t *buf, int buf_size)
 {
-    return 0;
+    return go_callback(ioctx, buf, buf_size);
 }
 
 int avformat_open_qrpc_input(AVFormatContext **ppctx, const char *fmt, void* ioctx)
@@ -48,9 +49,9 @@ end:
 }
 
 
-AVFormatContext* AVFormat_Open(const char *fmt, void* ioctx) {
+AVFormatContext* AVFormat_Open(const char *fmt, uintptr_t ioctx) {
     AVFormatContext* ctx;
-    if (avformat_open_qrpc_input(&ctx, fmt, ioctx) < 0) return NULL;
+    if (avformat_open_qrpc_input(&ctx, fmt, (void*)ioctx) < 0) return NULL;
 
     return ctx;
 }
