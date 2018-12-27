@@ -2,10 +2,10 @@
 #include <stdatomic.h>
 
 typedef struct AVFormatQrpcContext {
-    AVCodecContext **cctx;
+    AVCodecContext **cctx;// for decode input
     int nb_cctx;
-    AVFrame **latest;
-    void* ioctx;
+    AVFrame **latest; // store latest frame
+    void* ioctx; // reference to go
 } AVFormatQrpcContext;
 
 extern int read_packet_callback(void *ioctx, uint8_t *buf, int buf_size);

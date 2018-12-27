@@ -14,7 +14,7 @@ import (
 // PlayCmd for video
 type PlayCmd struct {
 	sync.RWMutex
-	fCtxMap map[string]*cgo.AVFormatContext
+	fCtxMap map[string]*cgo.AVFormatQrpcContext
 }
 
 // PlayRequest is param for PlayCmd
@@ -25,7 +25,7 @@ type PlayRequest struct {
 
 // NewPlayCmd creates PlayCmd
 func NewPlayCmd() *PlayCmd {
-	return &PlayCmd{fCtxMap: make(map[string]*cgo.AVFormatContext)}
+	return &PlayCmd{fCtxMap: make(map[string]*cgo.AVFormatQrpcContext)}
 }
 
 var (
@@ -85,7 +85,7 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 		return
 	}
 
-	fCtx := cgo.NewAVFormatContext("h264", frame.FrameCh())
+	fCtx := cgo.NewAVFormatQrpcContext("h264", frame.FrameCh())
 	defer fCtx.Free()
 
 	cmd.Lock()
