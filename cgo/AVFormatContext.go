@@ -2,8 +2,11 @@ package cgo
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/zhiqiangxu/qrpc"
@@ -24,16 +27,20 @@ import "C"
 
 // AVFormatContext wrapper for go
 type AVFormatContext struct {
-	fmt     string
-	frameCh <-chan *qrpc.Frame
-	payload []byte
-	offset  int
-	p       C.AVFormatContextPtr
+	sequence uint64
+	lock     sync.Mutex
+	watchers map[uint64]io.Writer
+	fmt      string
+	frameCh  <-chan *qrpc.Frame
+	payload  []byte
+	offset   int
+	p        C.AVFormatContextPtr
+	freed    int32
 }
 
 // NewAVFormatContext creates an AVFormatContext
 func NewAVFormatContext(fmt string, frameCh <-chan *qrpc.Frame) *AVFormatContext {
-	ctx := &AVFormatContext{fmt: fmt, frameCh: frameCh}
+	ctx := &AVFormatContext{fmt: fmt, frameCh: frameCh, watchers: make(map[uint64]io.Writer)}
 	fmtCStr := C.CString(fmt)
 	ctx.p = C.AVFormat_Open(fmtCStr, C.uintptr_t(uintptr(unsafe.Pointer(ctx))))
 	C.free(unsafe.Pointer(fmtCStr))
@@ -41,9 +48,59 @@ func NewAVFormatContext(fmt string, frameCh <-chan *qrpc.Frame) *AVFormatContext
 	return ctx
 }
 
+// Free the AVFormatContext
+func (ctx *AVFormatContext) Free() {
+	atomic.StoreInt32(&ctx.freed, 1)
+	C.AVFormat_Free(ctx.p)
+}
+
 // ReadFrame will call AVIOContext internally
-func (ctx *AVFormatContext) ReadFrame() {
-	C.AVFormat_ReadFrame(ctx.p)
+func (ctx *AVFormatContext) ReadFrame() int {
+	return int(C.AVFormat_ReadFrame(ctx.p))
+}
+
+// ReadLatestVideoFrame for watcher
+func (ctx *AVFormatContext) ReadLatestVideoFrame(ofmt string, w io.Writer) error {
+	seq := atomic.AddUint64(&ctx.sequence, 1)
+	ctx.lock.Lock()
+	ctx.watchers[seq] = w
+	ctx.lock.Unlock()
+
+	fmtCStr := C.CString(ofmt)
+	ret := int(C.AVFormat_ReadLatestVideoFrame(ctx.p, fmtCStr, C.uint64_t(seq)))
+	C.free(unsafe.Pointer(fmtCStr))
+
+	ctx.lock.Lock()
+	delete(ctx.watchers, seq)
+	ctx.lock.Unlock()
+	if ret == 0 {
+		return nil
+	}
+
+	var errBuf [100]byte
+	C.AV_STRERROR(C.int(ret), (*C.char)(unsafe.Pointer(&errBuf[0])), C.int(len(errBuf)))
+	return fmt.Errorf("error code:%s", errBuf)
+
+}
+
+//export read_latest_callback
+func read_latest_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, bufSize C.int) C.int {
+	slice := &reflect.SliceHeader{Data: uintptr(unsafe.Pointer(buf)), Len: int(bufSize), Cap: int(bufSize)}
+
+	goseq := uint64(seq)
+	ctx := (*AVFormatContext)(ioctx)
+	ctx.lock.Lock()
+	w := ctx.watchers[goseq]
+	ctx.lock.Unlock()
+	if w == nil {
+		fmt.Fprintf(os.Stderr, "no writer for seq:%d", goseq)
+		return C.int(-1)
+	}
+	_, err := w.Write(*(*[]byte)(unsafe.Pointer(slice)))
+	if err != nil {
+		return -1
+	}
+	return C.int(0)
 }
 
 //export read_packet_callback
@@ -51,14 +108,14 @@ func read_packet_callback(ioctx unsafe.Pointer, buf *C.char, bufSize C.int) C.in
 
 	slice := &reflect.SliceHeader{Data: uintptr(unsafe.Pointer(buf)), Len: int(bufSize), Cap: int(bufSize)}
 
-	fmt.Println("bufSize", int(bufSize))
+	// fmt.Println("bufSize", int(bufSize))
 	ctx := (*AVFormatContext)(ioctx)
 
 	return C.int(ctx.fillSlice(*(*[]byte)(unsafe.Pointer(slice))))
 }
 
 func (ctx *AVFormatContext) fillSlice(buf []byte) int {
-	fmt.Println("fillSlice buf size =", len(buf))
+	// fmt.Println("fillSlice buf size =", len(buf))
 
 	size := len(buf)
 
