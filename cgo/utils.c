@@ -150,6 +150,7 @@ end:
     av_frame_free(&frame);
     av_packet_unref(&pkt);
 
+
     return ret;
 }
 
@@ -242,10 +243,9 @@ void free_qrpc_context(AVFormatQrpcContext *qrpcCtx)
     }
 }
 
-int GOAVERROR_EINVAL()
-{
-    return AVERROR(EINVAL);
-}
+int GOAVERROR_EINVAL = AVERROR(EINVAL);
+int GOAVERROR_EOF = AVERROR_EOF;
+int GOAVERROR_EAGAIN = AVERROR(EAGAIN);
 
 int open_codec_context(int stream_idx, AVCodecContext **dec_ctx, AVFormatContext *fmt_ctx)
 {

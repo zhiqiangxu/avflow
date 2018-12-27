@@ -12,6 +12,9 @@ int AVFormat_ReadFrame(AVFormatContext* ctx);
 
 int AVFormat_ReadLatestVideoFrame(AVFormatContext* ctx, const char *fmt, uint64_t seq);
 
-int GOAVERROR_EINVAL();
+extern int GOAVERROR_EINVAL;
+extern int GOAVERROR_EOF;
+extern int GOAVERROR_EAGAIN;
 
 int AV_STRERROR(int errnum, char *errbuf, int errbuf_size);
+

@@ -25,6 +25,10 @@ import (
 // #include "utils.h"
 import "C"
 
+const (
+	maxErrSize = 30
+)
+
 // AVFormatContext wrapper for go
 type AVFormatContext struct {
 	sequence uint64
@@ -55,8 +59,15 @@ func (ctx *AVFormatContext) Free() {
 }
 
 // ReadFrame will call AVIOContext internally
-func (ctx *AVFormatContext) ReadFrame() int {
-	return int(C.AVFormat_ReadFrame(ctx.p))
+func (ctx *AVFormatContext) ReadFrame() error {
+	ret := int(C.AVFormat_ReadFrame(ctx.p))
+	if ret == 0 || ret == int(C.GOAVERROR_EAGAIN) {
+		return nil
+	}
+
+	errBuf := make([]byte, maxErrSize)
+	C.AV_STRERROR(C.int(ret), (*C.char)(unsafe.Pointer(&errBuf[0])), C.int(len(errBuf)))
+	return fmt.Errorf("%s", errBuf)
 }
 
 // ReadLatestVideoFrame for watcher
@@ -77,9 +88,9 @@ func (ctx *AVFormatContext) ReadLatestVideoFrame(ofmt string, w io.Writer) error
 		return nil
 	}
 
-	var errBuf [100]byte
+	errBuf := make([]byte, maxErrSize)
 	C.AV_STRERROR(C.int(ret), (*C.char)(unsafe.Pointer(&errBuf[0])), C.int(len(errBuf)))
-	return fmt.Errorf("error code:%s", errBuf)
+	return fmt.Errorf("%s", errBuf)
 
 }
 
@@ -134,6 +145,9 @@ func (ctx *AVFormatContext) fillSlice(buf []byte) int {
 	}
 
 	frame := <-ctx.frameCh
+	if frame == nil {
+		return int(C.GOAVERROR_EOF)
+	}
 	if size < len(frame.Payload) {
 		copy(buf, frame.Payload[0:size])
 		ctx.payload = frame.Payload
@@ -143,7 +157,7 @@ func (ctx *AVFormatContext) fillSlice(buf []byte) int {
 
 	if len(frame.Payload) == 0 {
 		fmt.Fprintln(os.Stderr, "found empty frame")
-		return int(C.GOAVERROR_EINVAL())
+		return int(C.GOAVERROR_EINVAL)
 	}
 
 	copy(buf, frame.Payload)

@@ -94,7 +94,11 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 
 	for {
 		// fmt.Println("before ReadFrame")
-		fCtx.ReadFrame()
+		err := fCtx.ReadFrame()
+		if err != nil {
+			fmt.Printf("ReadFrame return: %s", err.Error())
+			return
+		}
 		// fmt.Println("after ReadFrame")
 	}
 
