@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 	"strconv"
 
 	"github.com/zhiqiangxu/avflow/cmd"
@@ -40,6 +41,19 @@ func startHTTP(playCmd *cmd.PlayCmd) {
 		w.Header().Add("Content-Type", "image/jpeg")
 		w.Header().Add("Content-Length", strconv.Itoa(len(buf.Bytes())))
 		w.Write(buf.Bytes())
+	})
+	http.HandleFunc("/watch_hls", func(w http.ResponseWriter, r *http.Request) {
+
+		err := playCmd.SubcribeAVFrame("xu", "hls", w)
+		if err != nil {
+			w.Write([]byte(err.Error()))
+			return
+		}
+
+		select {
+		case <-r.Context().Done():
+			playCmd.UnsubcribeAVFrame("xu", w)
+		}
 	})
 	fmt.Println(srv.ListenAndServe())
 }

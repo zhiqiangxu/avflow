@@ -1,4 +1,8 @@
+#ifndef CGO_UTILS_H
+#define CGO_UTILS_H
+
 #include "libavformat/avformat.h"
+#include <pthread.h>
 
 typedef  AVFormatContext* AVFormatContextPtr;
 typedef AVPacket* AVPacketPtr;
@@ -14,9 +18,12 @@ int AVFormat_ReadLatestVideoFrame(AVFormatContext* ctx, const char *fmt, uint64_
 int AVFormat_SubcribeAVFrame(AVFormatContext* ctx, const char *fmt, uint64_t seq);
 void AVFormat_UnsubcribeAVFrame(AVFormatContext* ctx, uint64_t seq);
 
+
 extern int GOAVERROR_EINVAL;
 extern int GOAVERROR_EOF;
 extern int GOAVERROR_EAGAIN;
 
 int AV_STRERROR(int errnum, char *errbuf, int errbuf_size);
 
+
+#endif

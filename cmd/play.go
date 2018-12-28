@@ -45,6 +45,30 @@ func (cmd *PlayCmd) ReadLatestVideoFrame(id, fmt string, w io.Writer) error {
 	return fCtx.ReadLatestVideoFrame(fmt, w)
 }
 
+// SubcribeAVFrame to id with fmt
+func (cmd *PlayCmd) SubcribeAVFrame(id, fmt string, w io.Writer) error {
+	cmd.RLock()
+	fCtx := cmd.fCtxMap[id]
+	cmd.RUnlock()
+	if fCtx == nil {
+		return ErrNotPlaying
+	}
+
+	return fCtx.SubcribeAVFrame(fmt, w)
+}
+
+// UnsubcribeAVFrame w from id
+func (cmd *PlayCmd) UnsubcribeAVFrame(id string, w io.Writer) {
+	cmd.RLock()
+	fCtx := cmd.fCtxMap[id]
+	cmd.RUnlock()
+	if fCtx == nil {
+		return
+	}
+
+	fCtx.UnsubcribeAVFrame(w)
+}
+
 // ServeQRPC implements qrpc.Handler
 func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame) {
 	fmt.Println("PlayCmd start, payload =", string(frame.Payload))
