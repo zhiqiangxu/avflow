@@ -33,7 +33,8 @@ const (
 type AVFormatQrpcContext struct {
 	sequence uint64
 	lock     sync.Mutex
-	watchers map[uint64]io.Writer
+	s2w      map[uint64]io.Writer
+	w2s      map[io.Writer]uint64
 	fmt      string
 	frameCh  <-chan *qrpc.Frame
 	payload  []byte
@@ -44,7 +45,7 @@ type AVFormatQrpcContext struct {
 
 // NewAVFormatQrpcContext creates an AVFormatQrpcContext
 func NewAVFormatQrpcContext(fmt string, frameCh <-chan *qrpc.Frame) *AVFormatQrpcContext {
-	ctx := &AVFormatQrpcContext{fmt: fmt, frameCh: frameCh, watchers: make(map[uint64]io.Writer)}
+	ctx := &AVFormatQrpcContext{fmt: fmt, frameCh: frameCh, s2w: make(map[uint64]io.Writer), w2s: make(map[io.Writer]uint64)}
 	fmtCStr := C.CString(fmt)
 	ctx.p = C.AVFormat_Open(fmtCStr, C.uintptr_t(uintptr(unsafe.Pointer(ctx))))
 	C.free(unsafe.Pointer(fmtCStr))
@@ -70,11 +71,11 @@ func (ctx *AVFormatQrpcContext) ReadFrame() error {
 	return fmt.Errorf("%s", errBuf)
 }
 
-// ReadLatestVideoFrame for watcher
+// ReadLatestVideoFrame for snapshot
 func (ctx *AVFormatQrpcContext) ReadLatestVideoFrame(ofmt string, w io.Writer) error {
 	seq := atomic.AddUint64(&ctx.sequence, 1)
 	ctx.lock.Lock()
-	ctx.watchers[seq] = w
+	ctx.s2w[seq] = w
 	ctx.lock.Unlock()
 
 	fmtCStr := C.CString(ofmt)
@@ -82,7 +83,7 @@ func (ctx *AVFormatQrpcContext) ReadLatestVideoFrame(ofmt string, w io.Writer) e
 	C.free(unsafe.Pointer(fmtCStr))
 
 	ctx.lock.Lock()
-	delete(ctx.watchers, seq)
+	delete(ctx.s2w, seq)
 	ctx.lock.Unlock()
 	if ret == 0 {
 		return nil
@@ -94,6 +95,44 @@ func (ctx *AVFormatQrpcContext) ReadLatestVideoFrame(ofmt string, w io.Writer) e
 
 }
 
+// SubcribeAVFrame for video
+func (ctx *AVFormatQrpcContext) SubcribeAVFrame(ofmt string, w io.Writer) error {
+	seq := atomic.AddUint64(&ctx.sequence, 1)
+	ctx.lock.Lock()
+	ctx.s2w[seq] = w
+	ctx.w2s[w] = seq
+	ctx.lock.Unlock()
+
+	fmtCStr := C.CString(ofmt)
+	ret := int(C.AVFormat_SubcribeAVFrame(ctx.p, fmtCStr, C.uint64_t(seq)))
+	C.free(unsafe.Pointer(fmtCStr))
+
+	if ret == 0 {
+		return nil
+	}
+
+	ctx.lock.Lock()
+	delete(ctx.s2w, seq)
+	delete(ctx.w2s, w)
+	ctx.lock.Unlock()
+
+	errBuf := make([]byte, maxErrSize)
+	C.AV_STRERROR(C.int(ret), (*C.char)(unsafe.Pointer(&errBuf[0])), C.int(len(errBuf)))
+	return fmt.Errorf("%s", errBuf)
+}
+
+// UnsubcribeAVFrame for stop watch
+func (ctx *AVFormatQrpcContext) UnsubcribeAVFrame(w io.Writer) {
+	ctx.lock.Lock()
+	seq, ok := ctx.w2s[w]
+	if ok {
+		delete(ctx.s2w, seq)
+		delete(ctx.w2s, w)
+	}
+	ctx.lock.Unlock()
+	C.AVFormat_UnsubcribeAVFrame(ctx.p, C.uint64_t(seq))
+}
+
 //export read_latest_callback
 func read_latest_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, bufSize C.int) C.int {
 	slice := &reflect.SliceHeader{Data: uintptr(unsafe.Pointer(buf)), Len: int(bufSize), Cap: int(bufSize)}
@@ -101,7 +140,7 @@ func read_latest_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, buf
 	goseq := uint64(seq)
 	ctx := (*AVFormatQrpcContext)(ioctx)
 	ctx.lock.Lock()
-	w := ctx.watchers[goseq]
+	w := ctx.s2w[goseq]
 	ctx.lock.Unlock()
 	if w == nil {
 		fmt.Fprintf(os.Stderr, "no writer for seq:%d", goseq)
@@ -112,6 +151,11 @@ func read_latest_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, buf
 		return -1
 	}
 	return C.int(0)
+}
+
+//export write_packet_callback
+func write_packet_callback(ioctx unsafe.Pointer, seq uint64, buf *C.char, bufSize C.int) C.int {
+	return C.int(-1)
 }
 
 //export read_packet_callback
