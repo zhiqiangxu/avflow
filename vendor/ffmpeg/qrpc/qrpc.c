@@ -23,6 +23,8 @@ typedef struct QrpcContext {
     int         offset;
     char        *id;
     char        *pass;
+    char        *uri;
+    bool        publish;
 } QrpcContext;
 
 #define OFFSET(x) offsetof(QrpcContext, x)
@@ -84,10 +86,10 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
     const char *p;
     char buf[1024];
     int ret;
-    char hostname[1024],proto[10];
+    char hostname[1024],proto[10], path[256];
 
     av_url_split(proto, sizeof(proto), NULL, 0, hostname, sizeof(hostname),
-        &port, NULL, 0, uri);
+        &port, path, sizeof(path), uri);
     if (strcmp(proto, "qrpc"))
         return AVERROR(EINVAL);
     if (port <= 0 || port >= 65536) {
@@ -98,17 +100,32 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
     if (p) {
         if (av_find_info_tag(buf, sizeof(buf), "id", p)) {
             qctx->id = av_malloc(strlen(buf) + 1);
-            av_strlcpy(qctx->id, buf, sizeof(qctx->id));
+            av_strlcpy(qctx->id, buf, strlen(buf) + 1);
         } else {
             av_log(s, AV_LOG_ERROR, "id missing in uri\n");
             return AVERROR(EINVAL);
         }
         if (av_find_info_tag(buf, sizeof(buf), "pass", p)) {
             qctx->pass = av_malloc(strlen(buf) + 1);
-            av_strlcpy(qctx->pass, buf, sizeof(qctx->pass));
+            av_strlcpy(qctx->pass, buf, strlen(buf) + 1);
         } else {
             av_log(s, AV_LOG_ERROR, "pass missing in uri\n");
             return AVERROR(EINVAL);
+        }
+        if (av_find_info_tag(buf, sizeof(buf), "mode", p)) {
+            qctx->publish = !strcmp(buf, "publish");
+        } else {
+            av_log(s, AV_LOG_ERROR, "mode missing in uri\n");
+            return AVERROR(EINVAL);
+        }
+        if (!qctx->publish) {
+            p = strchr(path, '?');
+            if (p == path) {
+                av_log(s, AV_LOG_ERROR, "uri missing for non-publisher\n");
+                return AVERROR(EINVAL);
+            }
+            qctx->uri = av_malloc(p - path + 1);
+            av_strlcpy(qctx->uri, path, p - path + 1);
         }
     }
     
@@ -132,7 +149,11 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
     json_escape_str(&bp, qctx->id);
     av_bprintf(&bp,"\",\"pass\":\"");
     json_escape_str(&bp, qctx->pass);
-    av_bprintf(&bp,"\"}");
+    if (!qctx->publish) {
+        av_bprintf(&bp,"\",\"uri\":\"");
+        json_escape_str(&bp, qctx->uri);
+    }
+    av_bprintf(&bp,"\",\"publish\":%d}", qctx->publish ? 1 : 0);
 
     char* json;
     av_bprint_finalize(&bp, &json);
@@ -148,7 +169,8 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
     if (!(pkt.payload_len == 2 && pkt.payload[0] == 'O' && pkt.payload[1] == 'K'))
         ret = AVERROR_INVALIDDATA;
 
-
+    
+    printf("qrpc_open:ret = %d, len = %d\n", ret, pkt.payload_len);
     ff_qrpc_packet_destroy(&pkt);
     return ret;
 }
@@ -179,7 +201,7 @@ static int qrpc_read(URLContext *h, uint8_t *buf, int size)
                 qctx->offset += remain;
             }
 
-            if (offset == size) return 0;
+            if (offset == size) return size;
 
             remain = size - offset;
         }
@@ -200,7 +222,7 @@ static int qrpc_read(URLContext *h, uint8_t *buf, int size)
             pkt.payload = NULL;
         }
 
-        if (offset == size) return 0;
+        if (offset == size) return size;
     }
     
 }

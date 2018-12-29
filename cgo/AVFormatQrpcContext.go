@@ -154,13 +154,15 @@ func read_packet_seq_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char,
 }
 
 //export write_packet_seq_callback
-func write_packet_seq_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, bufSize C.int) C.int {
+func write_packet_seq_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, bufSize C.int) (ret C.int) {
+
 	goseq := uint64(seq)
 	ctx := (*AVFormatQrpcContext)(ioctx)
 	ctx.lock.Lock()
 	w, ok := ctx.s2w[goseq]
 	if !ok {
 		ctx.lock.Unlock()
+		fmt.Println("no w for seq", goseq)
 		return C.int(-1)
 	}
 	ctx.lock.Unlock()
@@ -168,6 +170,7 @@ func write_packet_seq_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char
 	slice := &reflect.SliceHeader{Data: uintptr(unsafe.Pointer(buf)), Len: int(bufSize), Cap: int(bufSize)}
 	_, err := w.Write(*(*[]byte)(unsafe.Pointer(slice)))
 	if err != nil {
+		fmt.Println("Write err", err)
 		return C.int(-1)
 	}
 

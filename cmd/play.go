@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/zhiqiangxu/avflow/cgo"
+	w "github.com/zhiqiangxu/avflow/pkg/writer"
 	"github.com/zhiqiangxu/qrpc"
 )
 
@@ -19,8 +20,10 @@ type PlayCmd struct {
 
 // PlayRequest is param for PlayCmd
 type PlayRequest struct {
-	ID   string `json:"id"`
-	Pass string `json:"pass"`
+	ID      string `json:"id"`
+	Pass    string `json:"pass"`
+	Publish int    `json:"publish"`
+	Uri     string `json:"uri"`
 }
 
 // NewPlayCmd creates PlayCmd
@@ -85,6 +88,47 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 		frame.Close()
 		return
 	}
+
+	if req.Publish == 0 {
+		if req.Uri == "" {
+			fmt.Println("uri empty")
+			frame.Close()
+			return
+		}
+		id := req.Uri[1:len(req.Uri)]
+		fmt.Println("id = ", id)
+
+		cmd.Lock()
+		fCtx := cmd.fCtxMap[req.ID]
+		cmd.Unlock()
+
+		if fCtx == nil {
+			fmt.Println("requested id not playing", id)
+			frame.Close()
+			return
+		}
+
+		writer.StartWrite(frame.RequestID, PlayResp, qrpc.StreamFlag)
+		writer.WriteBytes([]byte("OK"))
+		err = writer.EndWrite()
+		if err != nil {
+			fmt.Println("EndWrite", err)
+			frame.Close()
+			return
+		}
+
+		err := fCtx.SubcribeAVFrame("mpegts", w.NewQrpcWriter(writer, frame, PlayResp))
+		if err != nil {
+			fmt.Println("SubcribeAVFrame", err)
+			frame.Close()
+			return
+		}
+		fmt.Println("SubcribeAVFrame ok")
+		<-frame.Context().Done()
+		fmt.Println("done")
+		return
+	}
+
 	cmd.Lock()
 	if _, ok := cmd.fCtxMap[req.ID]; ok {
 		cmd.Unlock()
