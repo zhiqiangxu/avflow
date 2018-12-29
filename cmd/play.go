@@ -109,7 +109,7 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 		return
 	}
 
-	fCtx := cgo.NewAVFormatQrpcContext("h264", frame.FrameCh())
+	fCtx := cgo.NewAVFormatQrpcContext("mpegts", frame.FrameCh())
 	defer fCtx.Free()
 
 	cmd.Lock()

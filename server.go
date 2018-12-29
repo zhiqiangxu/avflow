@@ -42,9 +42,9 @@ func startHTTP(playCmd *cmd.PlayCmd) {
 		w.Header().Add("Content-Length", strconv.Itoa(len(buf.Bytes())))
 		w.Write(buf.Bytes())
 	})
-	http.HandleFunc("/watch_hls", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/watch_mpegts", func(w http.ResponseWriter, r *http.Request) {
 
-		err := playCmd.SubcribeAVFrame("xu", "hls", w)
+		err := playCmd.SubcribeAVFrame("xu", "mpegts", w)
 		if err != nil {
 			w.Write([]byte(err.Error()))
 			return

@@ -133,8 +133,8 @@ func (ctx *AVFormatQrpcContext) UnsubcribeAVFrame(w io.Writer) {
 	C.AVFormat_UnsubcribeAVFrame(ctx.p, C.uint64_t(seq))
 }
 
-//export read_latest_callback
-func read_latest_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, bufSize C.int) C.int {
+//export read_packet_seq_callback
+func read_packet_seq_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, bufSize C.int) C.int {
 	slice := &reflect.SliceHeader{Data: uintptr(unsafe.Pointer(buf)), Len: int(bufSize), Cap: int(bufSize)}
 
 	goseq := uint64(seq)
@@ -153,9 +153,25 @@ func read_latest_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, buf
 	return C.int(0)
 }
 
-//export write_packet_callback
-func write_packet_callback(ioctx unsafe.Pointer, seq uint64, buf *C.char, bufSize C.int) C.int {
-	return C.int(-1)
+//export write_packet_seq_callback
+func write_packet_seq_callback(ioctx unsafe.Pointer, seq C.uint64_t, buf *C.char, bufSize C.int) C.int {
+	goseq := uint64(seq)
+	ctx := (*AVFormatQrpcContext)(ioctx)
+	ctx.lock.Lock()
+	w, ok := ctx.s2w[goseq]
+	if !ok {
+		ctx.lock.Unlock()
+		return C.int(-1)
+	}
+	ctx.lock.Unlock()
+
+	slice := &reflect.SliceHeader{Data: uintptr(unsafe.Pointer(buf)), Len: int(bufSize), Cap: int(bufSize)}
+	_, err := w.Write(*(*[]byte)(unsafe.Pointer(slice)))
+	if err != nil {
+		return C.int(-1)
+	}
+
+	return C.int(0)
 }
 
 //export read_packet_callback

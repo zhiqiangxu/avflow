@@ -3,17 +3,18 @@
 #include <stdbool.h>
 
 
-typedef struct AVFormatQrpcContextSubcriber {
+typedef struct AVFormatQrpcContextSubscriber {
+    AVCodecContext **enc_ctx;
     AVFormatContext *sctx;
     uint64_t seq;
-    struct AVFormatQrpcContextSubcriber *next;
-} AVFormatQrpcContextSubcriber;
+    struct AVFormatQrpcContextSubscriber *next;
+} AVFormatQrpcContextSubscriber;
 
-typedef struct AVFormatQrpcContextSubcriberList {
-    AVFormatQrpcContextSubcriber *first;
-    AVFormatQrpcContextSubcriber *last;
+typedef struct AVFormatQrpcContextSubscriberList {
+    AVFormatQrpcContextSubscriber *first;
+    AVFormatQrpcContextSubscriber *last;
     int n;
-} AVFormatQrpcContextSubcriberList;
+} AVFormatQrpcContextSubscriberList;
 
 typedef struct AVFormatQrpcContext {
     AVCodecContext **dec_ctx;// for decode input
@@ -21,23 +22,31 @@ typedef struct AVFormatQrpcContext {
     AVFrame **latest; // store latest frame
     void* ioctx; // reference to go
     pthread_mutex_t mutex;
-    AVFormatQrpcContextSubcriberList *subcribers;
+    AVFormatQrpcContextSubscriberList *subscribers;
 } AVFormatQrpcContext;
+
+typedef struct IOSeqContext {
+    void *ioctx;
+    uint64_t seq;
+} IOSeqContext;
 
 
 extern int read_packet_callback(void *ioctx, uint8_t *buf, int buf_size);
-extern int read_latest_callback(void *ioctx, uint64_t seq, uint8_t *buf, int buf_size);
-extern int write_packet_callback(void *ioctx, uint64_t seq, uint8_t *buf, int bufSize);
+extern int read_packet_seq_callback(void *ioctx, uint64_t seq, uint8_t *buf, int buf_size);
+extern int write_packet_seq_callback(void *ioctx, uint64_t seq, uint8_t *buf, int bufSize);
 
 static int open_codec_context(int stream_idx, AVCodecContext **dec_ctx, AVFormatContext *fmt_ctx);
 static void free_qrpc_context(AVFormatQrpcContext *qrpcCtx);
-static void write_subcribers(AVFormatQrpcContext *qrpcCtx, AVPacket *pkt);
-static AVFormatQrpcContextSubcriber* new_subcriber(AVFormatContext *oc, uint64_t seq);
-static void add_subscriber(AVFormatQrpcContext *qrpcCtx, AVFormatQrpcContextSubcriber *subcriber);
+static void write_subscribers(AVFormatQrpcContext *qrpcCtx, int stream_index, AVFrame *frame);
+static AVFormatQrpcContextSubscriber* new_subscriber(AVFormatContext *oc, uint64_t seq);
+static void add_subscriber(AVFormatQrpcContext *qrpcCtx, AVFormatQrpcContextSubscriber *subscriber);
 static void del_subscriber(AVFormatQrpcContext* qrpcCtx, uint64_t seq, bool locked);
-static void free_subcriber(AVFormatQrpcContextSubcriber* sub);
-static int write_subcriber_callback(void* sub, uint8_t *buf, int buf_size);
-static int prepare_output_formatcontext(AVFormatContext *ifc, AVFormatContext *ofc);
+static void free_subscriber(AVFormatQrpcContextSubscriber* sub);
+static int write_subscriber_callback(void* sub, uint8_t *buf, int buf_size);
+static int prepare_avformatcontext_for_output(AVFormatContext *ifc, AVFormatQrpcContextSubscriber *subscriber);
+static int encode_avframe(AVFrame *frame, AVCodecContext *enc_ctx, void *opaque, int(*on_pkt)(void *, AVPacket *));
+static int on_ioseq_pkt(void *opaque, AVPacket *pkt);
+static int on_subscriber_pkt(void *opaque, AVPacket *pkt);
     
 
 
@@ -106,7 +115,7 @@ int avformat_open_qrpc_input(AVFormatContext **ppctx, const char *fmt, void* ioc
     }
     
     if ((ret = pthread_mutex_init(&qrpcCtx->mutex, NULL)) < 0) goto end;
-    qrpcCtx->subcribers = NULL;
+    qrpcCtx->subscribers = NULL;
 
 end:
     if (ret < 0) {
@@ -147,11 +156,7 @@ int AVFormat_ReadFrame(AVFormatContext* ctx)
         return ret;
     }
     
-
     AVFormatQrpcContext *qrpcCtx = ctx->opaque;
-    AVPacket copy;
-    av_packet_ref(&copy, &pkt);
-    write_subcribers(qrpcCtx, &copy);
 
     AVCodecContext *dec_ctx = qrpcCtx->dec_ctx[pkt.stream_index];
     ret = avcodec_send_packet(dec_ctx, &pkt);
@@ -165,6 +170,10 @@ int AVFormat_ReadFrame(AVFormatContext* ctx)
             fprintf(stderr, "Error while receiving a frame from the decoder\n");
             break;
         }
+
+
+        write_subscribers(qrpcCtx, pkt.stream_index, frame);
+
         if (!qrpcCtx->latest[pkt.stream_index]) {
             AVFrame *latest = av_frame_clone(frame);
             qrpcCtx->latest[pkt.stream_index] = latest;
@@ -214,29 +223,46 @@ int AVFormat_ReadLatestVideoFrame(AVFormatContext* ctx, const char *fmt, uint64_
         encctx->height = qrpcCtx->latest[i]->height;
         if ((ret = avcodec_open2(encctx, enc, NULL)) < 0) goto end;
 
-        AVPacket pkt;
-        av_init_packet(&pkt);
     
-        int ret = avcodec_send_frame(encctx, qrpcCtx->latest[i]);
+        IOSeqContext ioseq = {qrpcCtx->ioctx, seq};
+        int ret = encode_avframe(qrpcCtx->latest[i], encctx, &ioseq, on_ioseq_pkt);
         if (ret < 0) {
             fprintf(stderr, "avcodec_send_frame err:%d", ret);
             goto endloop;
         }
-        while (ret >= 0) {
-            ret = avcodec_receive_packet(encctx, &pkt);
-            if (ret >= 0) {
-                ret = read_latest_callback(qrpcCtx->ioctx, seq, pkt.data, pkt.size);
-                if (ret < 0) ret = AVERROR(EPIPE);
-            }
-        }
 
         endloop:
-        av_packet_unref(&pkt);
         break;
     }
 
 end:
     avcodec_free_context(&encctx);
+    return ret;
+}
+
+int on_ioseq_pkt(void *opaque, AVPacket *pkt)
+{
+    IOSeqContext *ioseq = (IOSeqContext *)opaque;
+    return read_packet_seq_callback(ioseq->ioctx, ioseq->seq, pkt->data, pkt->size);
+}
+
+int encode_avframe(AVFrame *frame, AVCodecContext *enc_ctx, void *opaque, int(*on_pkt)(void *, AVPacket *))
+{
+    int ret = avcodec_send_frame(enc_ctx, frame);
+    if (ret < 0) {
+        fprintf(stderr, "avcodec_send_frame err:%d", ret);
+        goto end;
+    }
+    while (ret >= 0) {
+        AVPacket pkt;
+        av_init_packet(&pkt);
+        ret = avcodec_receive_packet(enc_ctx, &pkt);
+        if (ret >= 0) {
+            ret = on_pkt(opaque, &pkt);
+        }
+    }
+
+end:    
     return ret;
 }
 
@@ -260,22 +286,22 @@ int AVFormat_SubcribeAVFrame(AVFormatContext* ctx, const char *fmt, uint64_t seq
         goto end;
     }
 
-    AVFormatQrpcContextSubcriber *subcriber = new_subcriber(oc, seq);
+    AVFormatQrpcContextSubscriber *subscriber = new_subscriber(oc, seq);
     AVIOContext *avio_ctx = avio_alloc_context(avio_ctx_buffer, avio_ctx_buffer_size,
-                                  0, subcriber, NULL, &write_subcriber_callback, NULL);
+                                  0, subscriber, NULL, &write_subscriber_callback, NULL);
     if (!avio_ctx) {
         ret = AVERROR(ENOMEM);
         goto end;
     }
 
     oc->pb = avio_ctx;
-    if ((ret = prepare_output_formatcontext(ctx, oc)) < 0) goto end;
+    if ((ret = prepare_avformatcontext_for_output(ctx, subscriber)) < 0) goto end;
     
-    add_subscriber(qrpcCtx, subcriber);
+    add_subscriber(qrpcCtx, subscriber);
 
  end:
     if (ret < 0) {
-        if (subcriber) free_subcriber(subcriber);
+        if (subscriber) free_subscriber(subscriber);
         else avformat_free_context(oc);
 
         if (avio_ctx) {
@@ -297,54 +323,68 @@ void AVFormat_UnsubcribeAVFrame(AVFormatContext* ctx, uint64_t seq)
     del_subscriber(qrpcCtx, seq, false);
 }
 
-void write_subcribers(AVFormatQrpcContext *qrpcCtx, AVPacket *pkt)
+void write_subscribers(AVFormatQrpcContext *qrpcCtx, int stream_index, AVFrame *frame)
 {
     pthread_mutex_lock(&qrpcCtx->mutex);
-    if (qrpcCtx->subcribers) {
+    if (qrpcCtx->subscribers) {
         int ret;
-        AVFormatQrpcContextSubcriber *subcriber = qrpcCtx->subcribers->first;
-        while (subcriber) {
-            AVFormatQrpcContextSubcriber *next = subcriber->next;
-            if ((ret = av_interleaved_write_frame(subcriber->sctx, pkt)) < 0) {
-                del_subscriber(qrpcCtx, subcriber->seq, true);
+        AVFormatQrpcContextSubscriber *subscriber = qrpcCtx->subscribers->first;
+        while (subscriber) {
+            AVFormatQrpcContextSubscriber *next = subscriber->next;
+            if (!subscriber->enc_ctx[stream_index]) {
+                subscriber = next;
+                continue;
+            }
+            ret = encode_avframe(frame, subscriber->enc_ctx[stream_index], subscriber->sctx, on_subscriber_pkt);
+            
+            if (ret < 0 && ret != AVERROR(EAGAIN)) {
+                del_subscriber(qrpcCtx, subscriber->seq, true);
 
                 char errStr[30];
                 av_strerror(ret, errStr, sizeof(errStr));
-                av_log(NULL, AV_LOG_ERROR, "Failed av_interleaved_write_frame:%s\n", errStr);
+                av_log(NULL, AV_LOG_ERROR, "Failed encode_avframe:%s\n", errStr);
             }
-            subcriber = next;
+            subscriber = next;
         }
     }
     pthread_mutex_unlock(&qrpcCtx->mutex);
 }
 
-AVFormatQrpcContextSubcriber* new_subcriber(AVFormatContext *oc, uint64_t seq)
+int on_subscriber_pkt(void *opaque, AVPacket *pkt)
 {
-    AVFormatQrpcContextSubcriber *subcriber = av_malloc(sizeof(AVFormatQrpcContextSubcriber));
-    
-    subcriber->sctx = oc;
-    subcriber->seq = seq;
-    subcriber->next = NULL;
-    return subcriber;
+    AVFormatContext *ofc = opaque;
+    printf("on_subscriber_pkt pts:%f\n", pkt->pts);
+    return av_interleaved_write_frame(ofc, pkt);
 }
 
-void add_subscriber(AVFormatQrpcContext* qrpcCtx, AVFormatQrpcContextSubcriber *subcriber)
+AVFormatQrpcContextSubscriber* new_subscriber(AVFormatContext *oc, uint64_t seq)
+{
+    AVFormatQrpcContextSubscriber *subscriber = av_malloc(sizeof(AVFormatQrpcContextSubscriber));
+    
+    subscriber->sctx = oc;
+    subscriber->seq = seq;
+    subscriber->next = NULL;
+    subscriber->enc_ctx = NULL;
+    return subscriber;
+}
+
+void add_subscriber(AVFormatQrpcContext* qrpcCtx, AVFormatQrpcContextSubscriber *subscriber)
 {
     pthread_mutex_lock(&qrpcCtx->mutex);
-    if (!qrpcCtx->subcribers) {
-        AVFormatQrpcContextSubcriberList *subcribers = av_malloc(sizeof(AVFormatQrpcContextSubcriberList));
-        subcribers->first = subcribers->last = subcriber;
-        subcribers->n = 1;
-        qrpcCtx->subcribers = subcribers;
+    if (!qrpcCtx->subscribers) {
+        AVFormatQrpcContextSubscriberList *subscribers = av_malloc(sizeof(AVFormatQrpcContextSubscriberList));
+        subscribers->first = subscribers->last = subscriber;
+        subscribers->n = 1;
+        qrpcCtx->subscribers = subscribers;
     } else {
-        if (!qrpcCtx->subcribers->last) {
-            qrpcCtx->subcribers->first = qrpcCtx->subcribers->last = subcriber;
+        if (!qrpcCtx->subscribers->last) {
+            qrpcCtx->subscribers->first = qrpcCtx->subscribers->last = subscriber;
         }
         else {
-            qrpcCtx->subcribers->last->next = subcriber;
-            qrpcCtx->subcribers->last = subcriber;
+            qrpcCtx->subscribers->last->next = subscriber;
+            qrpcCtx->subscribers->last = subscriber;
         }
-        qrpcCtx->subcribers->n ++;
+        qrpcCtx->subscribers->n ++;
     }
     pthread_mutex_unlock(&qrpcCtx->mutex);
 }
@@ -352,20 +392,20 @@ void add_subscriber(AVFormatQrpcContext* qrpcCtx, AVFormatQrpcContextSubcriber *
 static void del_subscriber(AVFormatQrpcContext* qrpcCtx, uint64_t seq, bool locked)
 {
     if (!locked) pthread_mutex_lock(&qrpcCtx->mutex);
-    if (qrpcCtx->subcribers) {
-        AVFormatQrpcContextSubcriber* prev = NULL;
-        AVFormatQrpcContextSubcriber* sub = qrpcCtx->subcribers->first;
+    if (qrpcCtx->subscribers) {
+        AVFormatQrpcContextSubscriber* prev = NULL;
+        AVFormatQrpcContextSubscriber* sub = qrpcCtx->subscribers->first;
         while (sub) {
             if (sub->seq == seq) {
                 if (!prev) {
-                    qrpcCtx->subcribers->first = qrpcCtx->subcribers->last = NULL;
-                    free_subcriber(sub);
+                    qrpcCtx->subscribers->first = qrpcCtx->subscribers->last = NULL;
+                    free_subscriber(sub);
                 } else {
                     prev->next = sub->next;
-                    if (qrpcCtx->subcribers->last == sub) qrpcCtx->subcribers->last = prev;
-                    free_subcriber(sub);
+                    if (qrpcCtx->subscribers->last == sub) qrpcCtx->subscribers->last = prev;
+                    free_subscriber(sub);
                 }
-                qrpcCtx->subcribers->n --;
+                qrpcCtx->subscribers->n --;
                 goto end;
             }
             prev = sub;
@@ -376,20 +416,29 @@ end:
     if (!locked) pthread_mutex_unlock(&qrpcCtx->mutex);
 }
 
-void free_subcriber(AVFormatQrpcContextSubcriber* subcriber)
+void free_subscriber(AVFormatQrpcContextSubscriber* subscriber)
 {
-    avformat_free_context(subcriber->sctx);
-    av_free(subcriber);
+    for (int i = 0; i < subscriber->sctx->nb_streams; i++) {
+        if (subscriber->enc_ctx[i]) avcodec_free_context(&subscriber->enc_ctx[i]);
+    }
+    avformat_free_context(subscriber->sctx);
+    av_free(subscriber);
 }
 
-int write_subcriber_callback(void* subvoid, uint8_t *buf, int buf_size)
+int write_subscriber_callback(void* subvoid, uint8_t *buf, int buf_size)
 {
-    AVFormatQrpcContextSubcriber* sub = subvoid;
-    return write_packet_callback(sub->sctx->opaque, sub->seq, buf, buf_size);
+    AVFormatQrpcContextSubscriber* sub = subvoid;
+    return write_packet_seq_callback(sub->sctx->opaque, sub->seq, buf, buf_size);
 }
 
-int prepare_output_formatcontext(AVFormatContext *ifc, AVFormatContext *ofc)
+int prepare_avformatcontext_for_output(AVFormatContext *ifc, AVFormatQrpcContextSubscriber *subscriber)
 {
+    AVFormatContext *ofc = subscriber->sctx;
+    subscriber->enc_ctx = av_mallocz_array(ofc->nb_streams, sizeof(AVCodecContext *));
+    if (!subscriber->enc_ctx) {
+        av_log(NULL, AV_LOG_ERROR, "Failed allocating AVCodecContext *\n");
+        return AVERROR(ENOMEM);
+    }
     int ret = 0;
     AVFormatQrpcContext *qrpcCtx = ifc->opaque;
     for (int i = 0; i < ifc->nb_streams; i++) {
@@ -401,6 +450,7 @@ int prepare_output_formatcontext(AVFormatContext *ifc, AVFormatContext *ofc)
 
         AVStream *in_stream = ifc->streams[i];
         AVCodecContext *dec_ctx = qrpcCtx->dec_ctx[i];
+        
         if (dec_ctx->codec_type == AVMEDIA_TYPE_VIDEO
                 || dec_ctx->codec_type == AVMEDIA_TYPE_AUDIO) {
             AVCodec *encoder = avcodec_find_encoder(dec_ctx->codec_id);
@@ -449,7 +499,7 @@ int prepare_output_formatcontext(AVFormatContext *ifc, AVFormatContext *ofc)
             }
 
             out_stream->time_base = enc_ctx->time_base;
-            avcodec_free_context(&enc_ctx);
+            subscriber->enc_ctx[i] = enc_ctx;
         }
     }
 
