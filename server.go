@@ -56,17 +56,19 @@ func startHTTP(playCmd *cmd.PlayCmd) {
 		wd, _ := os.Getwd()
 		http.ServeFile(w, r, wd+r.URL.Path)
 	})
+
 	var upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
-		}} // use default options
+		},
+		Subprotocols: []string{"null"}} // use default options
 
 	http.HandleFunc("/watch_mpegts", func(w http.ResponseWriter, r *http.Request) {
 
 		who := r.URL.Query().Get("who")
 		if who == "" {
 			w.Write([]byte("please specify who"))
-			// return
+			return
 		}
 
 		c, err := upgrader.Upgrade(w, r, nil)
@@ -75,8 +77,6 @@ func startHTTP(playCmd *cmd.PlayCmd) {
 			return
 		}
 
-		c.WriteMessage(websocket.TextMessage, []byte("hello world"))
-		select {}
 		err = playCmd.SubcribeAVFrame(who, "mpegts", writer.NewWSWriter(c))
 		if err != nil {
 			fmt.Println("SubcribeAVFrame", err)
