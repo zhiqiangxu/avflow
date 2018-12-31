@@ -3,8 +3,12 @@ package cmd
 import "github.com/zhiqiangxu/qrpc"
 
 const (
-	// Play for real time video
-	Play qrpc.Cmd = iota + 1
-	// PlayResp is resp for PlayCmd
+	// Auth for authentication
+	Auth qrpc.Cmd = iota + 1
+	// AuthResp is resp for Auth
+	AuthResp
+	// Play for real time streaming
+	Play
+	// PlayResp is resp for Play
 	PlayResp
 )

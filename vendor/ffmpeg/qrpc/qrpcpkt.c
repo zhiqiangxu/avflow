@@ -53,7 +53,8 @@ int ff_qrpc_packet_write(URLContext *h, QrpcPacket *pkt)
 
 int ff_qrpc_packet_read(URLContext *h, QrpcPacket *pkt)
 {
-    uint8_t pkt_hdr[16], *p = pkt_hdr;
+    uint8_t pkt_hdr[16];
+    const uint8_t *p = pkt_hdr;
     int ret;
 
     if ((ret = ffurl_read_complete(h, pkt_hdr, sizeof(pkt_hdr))) != sizeof(pkt_hdr))

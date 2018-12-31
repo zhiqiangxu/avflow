@@ -140,25 +140,57 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
     }
 
     QrpcPacket pkt;
+    if ((ret = ff_qrpc_packet_create(&pkt, QRPC_STREAM_AUTH, QRPC_CMD_AUTH, 0)) < 0)
+        return ret;
+
+    {
+        AVBPrint bp;
+        av_bprint_init(&bp, 1, AV_BPRINT_SIZE_UNLIMITED);
+        av_bprintf(&bp,"{\"id\":\"");
+        json_escape_str(&bp, qctx->id);
+        av_bprintf(&bp,"\",\"pass\":\"");
+        json_escape_str(&bp, qctx->pass);
+        av_bprintf(&bp,"\"}");
+        
+        char* json;
+        av_bprint_finalize(&bp, &json);
+        pkt.payload = json;
+        pkt.payload_len = bp.len;
+    }
+    
+
+    if ((ret = qrpc_send_packet(qctx, &pkt)) < 0)
+        return ret;
+
+    if ((ret = qrpc_read_packet(qctx, &pkt)) < 0)
+        return ret;
+    
+    if (!(pkt.payload_len == 2 && pkt.payload[0] == 'O' && pkt.payload[1] == 'K'))
+        ret = AVERROR_INVALIDDATA;
+    
+    printf("qrpc_open:ret = %d, len = %d\n", ret, pkt.payload_len);
+    ff_qrpc_packet_destroy(&pkt);
+
     if ((ret = ff_qrpc_packet_create(&pkt, QRPC_STREAM_PLAY, QRPC_CMD_PLAY, 0)) < 0)
         return ret;
 
-    AVBPrint bp;
-    av_bprint_init(&bp, 1, AV_BPRINT_SIZE_UNLIMITED);
-    av_bprintf(&bp,"{\"id\":\"");
-    json_escape_str(&bp, qctx->id);
-    av_bprintf(&bp,"\",\"pass\":\"");
-    json_escape_str(&bp, qctx->pass);
-    if (!qctx->publish) {
-        av_bprintf(&bp,"\",\"uri\":\"");
-        json_escape_str(&bp, qctx->uri);
+    
+    {
+        AVBPrint bp;
+        av_bprint_init(&bp, 1, AV_BPRINT_SIZE_UNLIMITED);
+        av_bprintf(&bp,"{\"publish\":%d", qctx->publish ? 1 : 0);
+        if (!qctx->publish) {
+            av_bprintf(&bp,",\"uri\":\"");
+            json_escape_str(&bp, qctx->uri);
+            av_bprintf(&bp,"\"");
+        }
+        av_bprintf(&bp,"}");
+        
+        char* json;
+        av_bprint_finalize(&bp, &json);
+        pkt.payload = json;
+        pkt.payload_len = bp.len;
     }
-    av_bprintf(&bp,"\",\"publish\":%d}", qctx->publish ? 1 : 0);
-
-    char* json;
-    av_bprint_finalize(&bp, &json);
-    pkt.payload = json;
-    pkt.payload_len = bp.len;
 
     if ((ret = qrpc_send_packet(qctx, &pkt)) < 0)
         return ret;
@@ -169,9 +201,8 @@ static int qrpc_open(URLContext *s, const char *uri, int flags)
     if (!(pkt.payload_len == 2 && pkt.payload[0] == 'O' && pkt.payload[1] == 'K'))
         ret = AVERROR_INVALIDDATA;
 
-    
-    printf("qrpc_open:ret = %d, len = %d\n", ret, pkt.payload_len);
-    ff_qrpc_packet_destroy(&pkt);
+    ff_qrpc_packet_destroy(&pkt);    
+
     return ret;
 }
 
@@ -207,7 +238,10 @@ static int qrpc_read(URLContext *h, uint8_t *buf, int size)
         }
 
         ret = qrpc_read_packet(qctx, &pkt);
-        if (ret < 0) return ret;
+        if (ret < 0) {
+            av_log(NULL, AV_LOG_ERROR, "qrpc_read_packet error:%d\n", ret);
+            return ret;
+        }
         
         if (pkt.payload_len <= remain) {
             memcpy(buf+offset, pkt.payload, pkt.payload_len);

@@ -20,10 +20,8 @@ type PlayCmd struct {
 
 // PlayRequest is param for PlayCmd
 type PlayRequest struct {
-	ID      string `json:"id"`
-	Pass    string `json:"pass"`
 	Publish int    `json:"publish"`
-	Uri     string `json:"uri"`
+	URI     string `json:"uri"`
 }
 
 // NewPlayCmd creates PlayCmd
@@ -76,6 +74,14 @@ func (cmd *PlayCmd) UnsubcribeAVFrame(id string, w io.Writer) {
 func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame) {
 	fmt.Println("PlayCmd start, payload =", string(frame.Payload))
 
+	ci := frame.ConnectionInfo()
+	sc := ci.SC
+	if sc.GetID() == "" {
+		fmt.Println("Should auth first")
+		frame.Close()
+		return
+	}
+
 	req := PlayRequest{}
 	if frame.Flags&qrpc.StreamFlag == 0 {
 		fmt.Println("PlayCmd must be streaming")
@@ -90,16 +96,16 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 	}
 
 	if req.Publish == 0 {
-		if req.Uri == "" {
+		if req.URI == "" {
 			fmt.Println("uri empty")
 			frame.Close()
 			return
 		}
-		id := req.Uri[1:len(req.Uri)]
+		id := req.URI[1:len(req.URI)]
 		fmt.Println("id = ", id)
 
 		cmd.Lock()
-		fCtx := cmd.fCtxMap[req.ID]
+		fCtx := cmd.fCtxMap[id]
 		cmd.Unlock()
 
 		if fCtx == nil {
@@ -130,17 +136,17 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 	}
 
 	cmd.Lock()
-	if _, ok := cmd.fCtxMap[req.ID]; ok {
+	if _, ok := cmd.fCtxMap[sc.GetID()]; ok {
 		cmd.Unlock()
-		fmt.Println("publishing twice:", req.ID)
+		fmt.Println("publishing twice:", sc.GetID())
 		frame.Close()
 		return
 	}
-	cmd.fCtxMap[req.ID] = nil
+	cmd.fCtxMap[sc.GetID()] = nil
 	cmd.Unlock()
 	defer func() {
 		cmd.Lock()
-		delete(cmd.fCtxMap, req.ID)
+		delete(cmd.fCtxMap, sc.GetID())
 		cmd.Unlock()
 	}()
 
@@ -157,7 +163,7 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 	defer fCtx.Free()
 
 	cmd.Lock()
-	cmd.fCtxMap[req.ID] = fCtx
+	cmd.fCtxMap[sc.GetID()] = fCtx
 	cmd.Unlock()
 
 	for {

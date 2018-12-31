@@ -17,6 +17,7 @@ func main() {
 
 	go startHTTP(playCmd)
 
+	handler.Handle(cmd.Auth, cmd.NewAuthCmd())
 	handler.Handle(cmd.Play, playCmd)
 
 	bindings := []qrpc.ServerBinding{

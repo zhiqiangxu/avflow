@@ -7,13 +7,13 @@
 
 
 typedef enum QrpcStream {
-    QRPC_STREAM_PLAY  =  1,
-    QRPC_STREAM_JSON  =  2,
+    QRPC_STREAM_AUTH  =  1,
+    QRPC_STREAM_PLAY  =  3,
 } QrpcStream;
 
 typedef enum QrpcCmd {
-    QRPC_CMD_PLAY   =  1,
-    QRPC_CMD_JSON   =  2,
+    QRPC_CMD_AUTH   =  1,
+    QRPC_CMD_PLAY   =  3,
 } QrpcCmd;
 
 typedef struct QrpcPacket {
