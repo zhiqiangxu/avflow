@@ -20,20 +20,20 @@ typedef struct AVFormatQrpcContext {
     AVCodecContext **dec_ctx;// for decode input
     int nb_streams;
     AVFrame **latest; // store latest frame
-    void* ioctx; // reference to go
+    void* goctx; // reference to go
     pthread_mutex_t mutex;
     AVFormatQrpcContextSubscriberList *subscribers;
 } AVFormatQrpcContext;
 
 typedef struct IOSeqContext {
-    void *ioctx;
+    void *goctx;
     uint64_t seq;
 } IOSeqContext;
 
 
-extern int read_packet_callback(void *ioctx, uint8_t *buf, int buf_size);
-extern int read_packet_seq_callback(void *ioctx, uint64_t seq, uint8_t *buf, int buf_size);
-extern int write_packet_seq_callback(void *ioctx, uint64_t seq, uint8_t *buf, int bufSize);
+extern int read_packet_callback(void *goctx, uint8_t *buf, int buf_size);
+extern int read_packet_seq_callback(void *goctx, uint64_t seq, uint8_t *buf, int buf_size);
+extern int write_packet_seq_callback(void *goctx, uint64_t seq, uint8_t *buf, int bufSize);
 
 static int open_codec_context(int stream_idx, AVCodecContext **dec_ctx, AVFormatContext *fmt_ctx);
 static void free_qrpc_context(AVFormatQrpcContext *qrpcCtx);
@@ -50,7 +50,7 @@ static int on_subscriber_pkt(void *opaque, AVPacket *pkt);
     
 
 
-int avformat_open_qrpc_input(AVFormatContext **ppctx, const char *fmt, void* ioctx)
+int avformat_open_qrpc_input(AVFormatContext **ppctx, const char *fmt, void* goctx)
 {
     AVIOContext *avio_ctx = NULL;
     AVFormatQrpcContext* qrpcCtx = NULL;
@@ -72,7 +72,7 @@ int avformat_open_qrpc_input(AVFormatContext **ppctx, const char *fmt, void* ioc
         goto end;
     }
     avio_ctx = avio_alloc_context(avio_ctx_buffer, avio_ctx_buffer_size,
-                                  0, ioctx, &read_packet_callback, NULL, NULL);
+                                  0, goctx, &read_packet_callback, NULL, NULL);
     if (!avio_ctx) {
         ret = AVERROR(ENOMEM);
         goto end;
@@ -97,7 +97,7 @@ int avformat_open_qrpc_input(AVFormatContext **ppctx, const char *fmt, void* ioc
         ret = AVERROR(ENOMEM);
         goto end;
     }
-    qrpcCtx->ioctx = ioctx;
+    qrpcCtx->goctx = goctx;
     qrpcCtx->nb_streams = (*ppctx)->nb_streams;
     qrpcCtx->dec_ctx = av_mallocz_array(qrpcCtx->nb_streams, sizeof(AVCodecContext*));
     if (!qrpcCtx->dec_ctx) {
@@ -135,9 +135,9 @@ end:
 }
 
 
-AVFormatContext* AVFormat_Open(const char *fmt, uintptr_t ioctx) {
+AVFormatContext* AVFormat_Open(const char *fmt, uintptr_t goctx) {
     AVFormatContext* ctx;
-    if (avformat_open_qrpc_input(&ctx, fmt, (void*)ioctx) < 0) {
+    if (avformat_open_qrpc_input(&ctx, fmt, (void*)goctx) < 0) {
         printf("avformat_open_qrpc_input fail\n");
         return NULL;
     }
@@ -224,7 +224,7 @@ int AVFormat_ReadLatestVideoFrame(AVFormatContext* ctx, const char *fmt, uint64_
         if ((ret = avcodec_open2(encctx, enc, NULL)) < 0) goto end;
 
     
-        IOSeqContext ioseq = {qrpcCtx->ioctx, seq};
+        IOSeqContext ioseq = {qrpcCtx->goctx, seq};
         int ret = encode_avframe(qrpcCtx->latest[i], encctx, &ioseq, on_ioseq_pkt);
         if (ret < 0) {
             fprintf(stderr, "encode_avframe err:%d", ret);
@@ -243,7 +243,7 @@ end:
 int on_ioseq_pkt(void *opaque, AVPacket *pkt)
 {
     IOSeqContext *ioseq = (IOSeqContext *)opaque;
-    return read_packet_seq_callback(ioseq->ioctx, ioseq->seq, pkt->data, pkt->size);
+    return read_packet_seq_callback(ioseq->goctx, ioseq->seq, pkt->data, pkt->size);
 }
 
 int encode_avframe(AVFrame *frame, AVCodecContext *enc_ctx, void *opaque, int(*on_pkt)(void *, AVPacket *))
@@ -277,7 +277,7 @@ int AVFormat_SubcribeAVFrame(AVFormatContext* ctx, const char *fmt, uint64_t seq
     AVFormatContext *oc;
     int ret;
     if ((ret = avformat_alloc_output_context2(&oc, ofmt, NULL, NULL)) < 0) return ret;
-    oc->opaque = qrpcCtx->ioctx;
+    oc->opaque = qrpcCtx->goctx;
 
     size_t avio_ctx_buffer_size = 4096;
     uint8_t *avio_ctx_buffer = av_malloc(avio_ctx_buffer_size);
