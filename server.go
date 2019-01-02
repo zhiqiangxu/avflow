@@ -77,7 +77,7 @@ func startHTTP(playCmd *cmd.PlayCmd) {
 			return
 		}
 
-		err = playCmd.SubcribeAVFrame(who, "mpegts", writer.NewWSWriter(c))
+		fCtx, err := playCmd.SubcribeAVFrame(who, "mpegts", writer.NewWSWriter(c))
 		if err != nil {
 			fmt.Println("SubcribeAVFrame", err)
 			c.Close()
@@ -87,7 +87,11 @@ func startHTTP(playCmd *cmd.PlayCmd) {
 		select {
 		case <-r.Context().Done():
 			playCmd.UnsubcribeAVFrame(who, w)
+		case <-fCtx.Done():
 		}
+
+		fmt.Println("SubcribeAVFrame done")
+		c.Close()
 	})
 	fmt.Println(srv.ListenAndServe())
 }

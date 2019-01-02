@@ -1,6 +1,7 @@
 package cgo
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -32,20 +33,29 @@ const (
 // AVFormatQrpcContext wrapper for go
 type AVFormatQrpcContext struct {
 	sequence uint64
-	lock     sync.Mutex
-	s2w      map[uint64]io.Writer
-	w2s      map[io.Writer]uint64
-	fmt      string
-	frameCh  <-chan *qrpc.Frame
-	payload  []byte
-	offset   int
-	p        C.AVFormatContextPtr
-	freed    int32
+	// guards following two maps
+	lock    sync.Mutex
+	s2w     map[uint64]io.Writer
+	w2s     map[io.Writer]uint64
+	fmt     string
+	frameCh <-chan *qrpc.Frame
+	payload []byte
+	offset  int
+	p       C.AVFormatContextPtr
+	// guards freed
+	flock  sync.Mutex
+	freed  bool
+	doneCh chan struct{}
 }
+
+var (
+	// ErrPublisherDone when done publishing
+	ErrPublisherDone = errors.New("publisher already done")
+)
 
 // NewAVFormatQrpcContext creates an AVFormatQrpcContext
 func NewAVFormatQrpcContext(fmt string, frameCh <-chan *qrpc.Frame) *AVFormatQrpcContext {
-	ctx := &AVFormatQrpcContext{fmt: fmt, frameCh: frameCh, s2w: make(map[uint64]io.Writer), w2s: make(map[io.Writer]uint64)}
+	ctx := &AVFormatQrpcContext{fmt: fmt, frameCh: frameCh, s2w: make(map[uint64]io.Writer), w2s: make(map[io.Writer]uint64), doneCh: make(chan struct{})}
 	fmtCStr := C.CString(fmt)
 	ctx.p = C.AVFormat_Open(fmtCStr, C.uintptr_t(uintptr(unsafe.Pointer(ctx))))
 	C.free(unsafe.Pointer(fmtCStr))
@@ -55,8 +65,17 @@ func NewAVFormatQrpcContext(fmt string, frameCh <-chan *qrpc.Frame) *AVFormatQrp
 
 // Free the AVFormatQrpcContext
 func (ctx *AVFormatQrpcContext) Free() {
-	atomic.StoreInt32(&ctx.freed, 1)
+	ctx.flock.Lock()
+	defer ctx.flock.Unlock()
+
+	ctx.freed = true
 	C.AVFormat_Free(ctx.p)
+	close(ctx.doneCh)
+}
+
+// Done for wait publisher done
+func (ctx *AVFormatQrpcContext) Done() <-chan struct{} {
+	return ctx.doneCh
 }
 
 // ReadFrame will call AVIOContext internally
@@ -79,7 +98,13 @@ func (ctx *AVFormatQrpcContext) ReadLatestVideoFrame(ofmt string, w io.Writer) e
 	ctx.lock.Unlock()
 
 	fmtCStr := C.CString(ofmt)
+	ctx.flock.Lock()
+	if ctx.freed {
+		ctx.flock.Unlock()
+		return ErrPublisherDone
+	}
 	ret := int(C.AVFormat_ReadLatestVideoFrame(ctx.p, fmtCStr, C.uint64_t(seq)))
+	ctx.flock.Unlock()
 	C.free(unsafe.Pointer(fmtCStr))
 
 	ctx.lock.Lock()
@@ -104,7 +129,13 @@ func (ctx *AVFormatQrpcContext) SubcribeAVFrame(ofmt string, w io.Writer) error 
 	ctx.lock.Unlock()
 
 	fmtCStr := C.CString(ofmt)
+	ctx.flock.Lock()
+	if ctx.freed {
+		ctx.flock.Unlock()
+		return ErrPublisherDone
+	}
 	ret := int(C.AVFormat_SubcribeAVFrame(ctx.p, fmtCStr, C.uint64_t(seq)))
+	ctx.flock.Unlock()
 	C.free(unsafe.Pointer(fmtCStr))
 
 	if ret == 0 {
@@ -130,7 +161,16 @@ func (ctx *AVFormatQrpcContext) UnsubcribeAVFrame(w io.Writer) {
 		delete(ctx.w2s, w)
 	}
 	ctx.lock.Unlock()
+	if !ok {
+		return
+	}
+
+	ctx.flock.Lock()
+	if ctx.freed {
+		ctx.flock.Unlock()
+	}
 	C.AVFormat_UnsubcribeAVFrame(ctx.p, C.uint64_t(seq))
+	ctx.flock.Unlock()
 }
 
 //export read_packet_seq_callback

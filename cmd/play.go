@@ -47,15 +47,15 @@ func (cmd *PlayCmd) ReadLatestVideoFrame(id, fmt string, w io.Writer) error {
 }
 
 // SubcribeAVFrame to id with fmt
-func (cmd *PlayCmd) SubcribeAVFrame(id, fmt string, w io.Writer) error {
+func (cmd *PlayCmd) SubcribeAVFrame(id, fmt string, w io.Writer) (*cgo.AVFormatQrpcContext, error) {
 	cmd.RLock()
 	fCtx := cmd.fCtxMap[id]
 	cmd.RUnlock()
 	if fCtx == nil {
-		return ErrNotPlaying
+		return nil, ErrNotPlaying
 	}
 
-	return fCtx.SubcribeAVFrame(fmt, w)
+	return fCtx, fCtx.SubcribeAVFrame(fmt, w)
 }
 
 // UnsubcribeAVFrame w from id
@@ -130,8 +130,13 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 			return
 		}
 		fmt.Println("SubcribeAVFrame ok")
-		<-frame.Context().Done()
-		fmt.Println("done")
+		select {
+		case <-frame.Context().Done():
+		case <-fCtx.Done():
+		}
+
+		fmt.Println("SubcribeAVFrame done")
+		frame.Close()
 		return
 	}
 
