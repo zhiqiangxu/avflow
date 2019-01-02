@@ -1,7 +1,9 @@
 #include "utils.h"
 #include <stdatomic.h>
 #include <stdbool.h>
+#include <inttypes.h>
 
+#define SEQ_ALL UINT64_MAX
 
 typedef struct AVFormatQrpcContextSubscriber {
     AVCodecContext **enc_ctx;
@@ -398,6 +400,19 @@ static void del_subscriber(AVFormatQrpcContext* qrpcCtx, uint64_t seq, bool lock
     if (qrpcCtx->subscribers) {
         AVFormatQrpcContextSubscriber* prev = NULL;
         AVFormatQrpcContextSubscriber* sub = qrpcCtx->subscribers->first;
+
+        // delete all
+        if (seq == SEQ_ALL) {
+            while (sub) {
+                AVFormatQrpcContextSubscriber *next = sub->next;
+                free_subscriber(sub);
+                sub = next;
+            }
+            av_free(qrpcCtx->subscribers);
+            qrpcCtx->subscribers = NULL;
+            goto end;
+        }
+        // delete one
         while (sub) {
             if (sub->seq == seq) {
                 if (!prev) {
@@ -528,6 +543,9 @@ void AVFormat_Free(AVFormatContext* ctx)
 void free_qrpc_context(AVFormatQrpcContext *qrpcCtx)
 {
     if (qrpcCtx) {
+        
+        del_subscriber(qrpcCtx, SEQ_ALL, false);
+
         if (qrpcCtx->dec_ctx) {
             for (int i = 0; i < qrpcCtx->nb_streams; i++) {
                 if (qrpcCtx->dec_ctx[i]) {

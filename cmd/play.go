@@ -135,6 +135,14 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 		return
 	}
 
+	var fCtx *cgo.AVFormatQrpcContext
+	defer func() {
+		if fCtx != nil {
+			// AVFormatQrpcContext must be freed last
+			fCtx.Free()
+		}
+	}()
+
 	cmd.Lock()
 	if _, ok := cmd.fCtxMap[sc.GetID()]; ok {
 		cmd.Unlock()
@@ -159,8 +167,7 @@ func (cmd *PlayCmd) ServeQRPC(writer qrpc.FrameWriter, frame *qrpc.RequestFrame)
 		return
 	}
 
-	fCtx := cgo.NewAVFormatQrpcContext("mpegts", frame.FrameCh())
-	defer fCtx.Free()
+	fCtx = cgo.NewAVFormatQrpcContext("mpegts", frame.FrameCh())
 
 	cmd.Lock()
 	cmd.fCtxMap[sc.GetID()] = fCtx
