@@ -14,18 +14,24 @@ git clean -f
 
 cp ../qrpc/qrpc* libavformat/
 if [ `uname` = "Darwin" ]; then 
-sed -i '' '/#include "libavformat\/protocol_list.c"/i \
-extern const URLProtocol ff_qrpc_protocol;\                                
-' libavformat/protocols.c
+	sed -i '' '/#include "libavformat\/protocol_list.c"/i \
+	extern const URLProtocol ff_qrpc_protocol;\                                
+	' libavformat/protocols.c
+
+	sed -i '' '/+= tcp.o/a \
+	OBJS += qrpc.o qrpcpkt.o\
+	' libavformat/Makefile
 else
-sed -i '/#include "libavformat\/protocol_list.c"/i \
-extern const URLProtocol ff_qrpc_protocol;\  
-' libavformat/protocols.c
+	sed -i '/#include "libavformat\/protocol_list.c"/i \
+	extern const URLProtocol ff_qrpc_protocol;\  
+	' libavformat/protocols.c
+
+	sed -i '/+= tcp.o/a \
+		OBJS += qrpc.o qrpcpkt.o\
+		' libavformat/Makefile
 fi
 
-sed -i '' '/+= tcp.o/a \
-OBJS += qrpc.o qrpcpkt.o\
-' libavformat/Makefile
+
 ./configure \
 	--prefix="$BUILD_DIR" \
 	--pkg-config-flags="--static"  \
