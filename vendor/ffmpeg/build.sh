@@ -13,9 +13,15 @@ git reset --hard
 git clean -f
 
 cp ../qrpc/qrpc* libavformat/
+if [ `uname` = "Darwin" ]; then 
 sed -i '' '/#include "libavformat\/protocol_list.c"/i \
 extern const URLProtocol ff_qrpc_protocol;\                                
 ' libavformat/protocols.c
+else
+sed -i '/#include "libavformat\/protocol_list.c"/i \
+extern const URLProtocol ff_qrpc_protocol;\  
+' libavformat/protocols.c
+fi
 
 sed -i '' '/+= tcp.o/a \
 OBJS += qrpc.o qrpcpkt.o\
