@@ -13,16 +13,23 @@ import (
 	"github.com/zhiqiangxu/qrpc"
 )
 
-// #cgo CFLAGS: -I${SRCDIR}/../vendor/ffmpeg/build/include
-// #cgo LDFLAGS: ${SRCDIR}/../vendor/ffmpeg/build/lib/libavcodec.a
-// #cgo LDFLAGS: ${SRCDIR}/../vendor/ffmpeg/build/lib/libavdevice.a
-// #cgo LDFLAGS: ${SRCDIR}/../vendor/ffmpeg/build/lib/libavfilter.a
-// #cgo LDFLAGS: ${SRCDIR}/../vendor/ffmpeg/build/lib/libavformat.a
-// #cgo LDFLAGS: ${SRCDIR}/../vendor/ffmpeg/build/lib/libavutil.a
-// #cgo LDFLAGS: ${SRCDIR}/../vendor/ffmpeg/build/lib/libpostproc.a
-// #cgo LDFLAGS: ${SRCDIR}/../vendor/ffmpeg/build/lib/libswresample.a
-// #cgo LDFLAGS: ${SRCDIR}/../vendor/ffmpeg/build/lib/libswscale.a
-// #cgo pkg-config: libavcodec libavdevice libavfilter libavformat libavutil libpostproc libswresample libswscale
+// #cgo CFLAGS: -I${SRCDIR}/../third_party/ffmpeg/build/include
+// #cgo LDFLAGS: ${SRCDIR}/../third_party/ffmpeg/build/lib/libavcodec.a
+// #cgo LDFLAGS: ${SRCDIR}/../third_party/ffmpeg/build/lib/libavdevice.a
+// #cgo LDFLAGS: ${SRCDIR}/../third_party/ffmpeg/build/lib/libavfilter.a
+// #cgo LDFLAGS: ${SRCDIR}/../third_party/ffmpeg/build/lib/libavformat.a
+// #cgo LDFLAGS: ${SRCDIR}/../third_party/ffmpeg/build/lib/libavutil.a
+// #cgo LDFLAGS: ${SRCDIR}/../third_party/ffmpeg/build/lib/libpostproc.a
+// #cgo LDFLAGS: ${SRCDIR}/../third_party/ffmpeg/build/lib/libswresample.a
+// #cgo LDFLAGS: ${SRCDIR}/../third_party/ffmpeg/build/lib/libswscale.a
+// #cgo pkg-config: ${SRCDIR}/../third_party/ffmpeg/build/lib/pkgconfig/libavutil.pc
+// #cgo pkg-config: ${SRCDIR}/../third_party/ffmpeg/build/lib/pkgconfig/libswscale.pc
+// #cgo pkg-config: ${SRCDIR}/../third_party/ffmpeg/build/lib/pkgconfig/libpostproc.pc
+// #cgo pkg-config: ${SRCDIR}/../third_party/ffmpeg/build/lib/pkgconfig/libswresample.pc
+// #cgo pkg-config: ${SRCDIR}/../third_party/ffmpeg/build/lib/pkgconfig/libavcodec.pc
+// #cgo pkg-config: ${SRCDIR}/../third_party/ffmpeg/build/lib/pkgconfig/libavformat.pc
+// #cgo pkg-config: ${SRCDIR}/../third_party/ffmpeg/build/lib/pkgconfig/libavfilter.pc
+// #cgo pkg-config: ${SRCDIR}/../third_party/ffmpeg/build/lib/pkgconfig/libavdevice.pc
 // #include "utils.h"
 import "C"
 
